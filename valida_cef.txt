@@ -1,0 +1,143 @@
+#### Script de Validacao Caixa ####
+### by Keslley Kledston Santos  ###
+####      version 1.0          ####
+##### Declaracao de Variaveis #####
+
+#CONCENTRADOR valores devem ser MN ou BE
+:global CONCENTRA MN
+
+#UNID_CEF indica a designação da Agencia Ex.: (PE-CEF-3449.ag.manauara)
+:global UNIDCEF PE-CEF-1549.Ag.Quiosque_Djauma_Batista-Rede02
+
+:global IPLAN 10.198.58.5
+
+###> IPLO - loopback central, IPLO1 - loopback de VRF
+:global IPLO 172.16.3.203
+:global IPLO1 10.61.3.203
+:global IPWAN 172.16.15.166
+:global BGPASAG
+:global BGPPEERAG
+
+# Variaveis Estaticas
+:global iBGPAS 263450
+:global BGPPEERGITEC
+:global NETLAN (($IPLAN -1)."/30")
+:global NETWAN (($IPWAN -2)."/30")
+
+##===========FIM DAS VARIAVEIS =============
+	
+
+#SYSTEMA
+:log warning ">>>>>> Peparando Sistema >>>>>>"
+/system identity set name=$UNIDCEF
+/user
+add name=keslley password=t3l3c0m group=full
+add name=AlfaMaster password=@lf@M@st3r group=full
+add name=suporte password=suporteabc* group=write
+/snmp community
+set [ find default=yes ] name=alfatelecom
+/snmp
+set contact=suporte@alfatelecom.info enabled=yes location=alfatelecom trap-version=2
+/system clock set time-zone-name=America/Manaus
+/system ntp client set enabled=yes primary-ntp=200.160.7.186 secondary-ntp=200.192.232.8
+/ip service
+set telnet port=50023
+set ftp port=50021
+set www port=50080
+set ssh port=50022
+:log warning "<<<<<< Sistema Pronto >>>>>>"
+
+
+#INTERFACES
+:log warning ">>>>>> Peparando Interfaces >>>>>>"
+/interface bridge add name=loopback protocol=none
+/ip address add interface=ether1 address=($IPWAN."/30") comment="UPLink Operadora"
+/ip address add interface=ether10 address=($IPLAN."/30") comment="DownLink Cliente"
+/ip address add interface=loopback address=($IPLO."/32")
+/interface l2tp-client
+add connect-to=177.91.232.2 disabled=no name=VPN-GERENCIA password=s3cur1ty user=$UNIDCEF
+:delay 2
+:log warning "<<<<<< Interfaces Prontas >>>>>>"
+
+#OSPF
+:log warning ">>>>>> Preparando OSPF >>>>>>"
+/routing ospf instance
+set [find default=yes] name=$UNIDCEF router-id=$IPLO
+/routing ospf network
+add area=backbone network=$NETLAN
+add area=backbone network=$NETWAN
+add area=backbone network=$IPLO
+/routing ospf interface
+add interface=ether1 network-type=broadcast
+:log error ">>Nao Esqueca de Anunciar a Network no OSPF do POP<<"
+:log warning "<<<<<< OSPF Preparado >>>>>>"
+
+#VRF
+:log warning ">>>>>> Preparando VRF >>>>>>"
+/ip route vrf
+add export-route-targets=($iBGPAS.":3") import-route-targets=($iBGPAS.":3") interfaces=ether10 route-distinguisher=($iBGPAS.":3") routing-mark=VRF-CEF-MN
+/routing bgp instance vrf
+add redistribute-connected=yes redistribute-other-bgp=yes routing-mark=VRF-CEF-MN redistribute-static=yes
+:log warning "<<<<<< VRF Preparado >>>>>>"
+
+:log warning ">>>>>> Preparando MPLS >>>>>>"
+/mpls ldp set enabled=yes lsr-id=$IPLO transport-address=$IPLO
+/mpls ldp interface
+add interface=ether1
+add interface=ether10
+/mpls interface set 0 mpls-mtu=1550
+:log warning "<<<<<< MPLS Preparado >>>>>>"
+
+:log warning ">>>>>> Preparando BGP >>>>>>"
+/routing bgp instance
+set default as=$iBGPAS client-to-client-reflection=no redistribute-other-bgp=yes router-id=$IPLO
+add as=$iBGPAS name=eBGP-CEF router-id=$IPLO1 routing-table=VRF-CEF-MN
+#Seleciona o ASN da Agencia
+{{:if ($CONCENTRA="MN") do={[:set $BGPASAG 65192 ] [:set $BGPPEERGITEC 172.16.3.201]} else={:if ($CONCENTRA="BE") do={[:set $BGPASAG 65191] [:set $BGPPEERGITEC 172.16.5.254] } else={:log error "Insira corretamente a designacao da Concentracao"}}}}
+
+/routing filter
+add action=accept chain=eBGP-CEF-IN comment="End-Point -GRE" prefix=10.60.7.0/24
+add action=accept chain=eBGP-CEF-IN comment="End-Point -GRE" prefix=10.60.39.0/24
+add action=accept chain=eBGP-CEF-IN comment="Peering - Concentradores" prefix=192.168.248.0/24 prefix-length=24-32
+add action=accept chain=eBGP-CEF-IN comment="Peering - Agencias" prefix=10.198.58.0/23 prefix-length=23-30
+add action=accept chain=eBGP-CEF-IN comment="Peering - GRE - GITEC-MN" prefix=10.198.0.0/23 prefix-length=23-30
+add action=accept chain=eBGP-CEF-IN comment="Peering - End Point VPN" prefix=10.198.35.0/29 prefix-length=29-32
+add action=discard chain=eBGP-CEF-IN prefix=10.0.0.0/14 prefix-length=14-32
+add action=discard chain=eBGP-CEF-IN prefix=10.192.0.0/14 prefix-length=14-32
+add action=discard chain=eBGP-CEF-IN prefix=10.252.0.0/14 prefix-length=14-32
+add action=discard chain=eBGP-CEF-IN prefix=10.222.0.0/15 prefix-length=14-32
+add action=discard chain=eBGP-CEF-IN prefix=10.220.0.0/15 prefix-length=15-32
+add action=discard chain=eBGP-CEF-IN prefix=10.218.0.0/15 prefix-length=15-32
+add action=discard chain=eBGP-CEF-IN prefix=10.216.0.0/15 prefix-length=15-32
+add action=discard chain=eBGP-CEF-IN prefix=10.128.0.0/14 prefix-length=14-32
+add action=discard chain=eBGP-CEF-IN prefix=10.122.0.0/15 prefix-length=15-32
+add action=discard chain=eBGP-CEF-IN prefix=10.120.0.0/15 prefix-length=15-32
+add action=discard chain=eBGP-CEF-IN prefix=10.118.0.0/15 prefix-length=15-32
+add action=discard chain=eBGP-CEF-IN prefix=192.168.0.254
+add action=discard chain=eBGP-CEF-IN prefix=172.16.32.0/24 prefix-length=24-32
+add action=discard chain=eBGP-CEF-IN prefix=172.17.32.0/24 prefix-length=24-32
+add action=discard chain=eBGP-CEF-IN prefix=172.24.33.0/28 prefix-length=28-32
+add action=discard chain=eBGP-CEF-IN prefix=172.24.32.110 prefix-length=32
+add action=discard chain=eBGP-CEF-IN prefix=172.24.45.240/28 prefix-length=28-32
+add action=accept bgp-as-path="^65050|65192\$" chain=eBGP-CEF-IN
+add action=discard chain=eBGP-CEF-IN
+add action=discard chain=eBGP-CEF-IN disabled=yes prefix=0.0.0.0/0
+add action=accept bgp-as-path="^65050|65192|65191\$" chain=eBGP-CEF-OUT disabled=yes
+add action=accept chain=eBGP-CEF-OUT disabled=yes prefix=10.198.58.0/23 prefix-length=23-30
+add action=accept chain=eBGP-CEF-OUT disabled=yes prefix=192.168.248.0/24 prefix-length=24-30
+add action=discard chain=eBGP-CEF-OUT disabled=yes
+add action=accept chain=eBGP-CEF-OUT disabled=yes prefix=0.0.0.0/0 prefix-length=0-32
+
+/routing bgp peer
+add address-families=ip,l2vpn,vpnv4 multihop=yes name=iBGP-CTC-BSB remote-address=172.16.2.254 remote-as=$iBGPAS ttl=default update-source=loopback
+add address-families=ip,l2vpn,vpnv4 multihop=yes name=("iBGP-GITEC-".$CONCENTRA) remote-address=$BGPPEERGITEC remote-as=$iBGPAS ttl=default update-source=loopback
+add address-families=ip,l2vpn,vpnv4 instance=eBGP-CEF name=eBGP-CEF nexthop-choice=force-self remote-address=($IPLAN +1) remote-as=$BGPASAG remove-private-as=yes ttl=default update-source=ether10 in-filter=eBGP-CEF-IN
+add address-families=ip,l2vpn,vpnv4 multihop=yes name=iBGP-CORE remote-address=172.16.3.255 remote-as=$iBGPAS ttl=default disabled=yes
+:log warning "<<<<<< BGP Preparado >>>>>>"
+
+	
+	
+:log warning ">>>> Lembrar de Configurar o iBGP nas Concentrações <<<<"
+###################### Fim do Script ##########################
+
+
